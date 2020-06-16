@@ -1,0 +1,5 @@
+public interface UpdateRequestEventListener {
+
+    public void handleUpdateRequestListener(EventObject event);
+
+}

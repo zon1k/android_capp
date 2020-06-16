@@ -1,0 +1,33 @@
+public class XmlParseException extends Exception {
+
+    /**
+     * Creates a new instance of <code>XmlParseException</code> without detail message.
+     */
+    public XmlParseException() {
+    }
+
+    /**
+     * Constructs an instance of <code>XmlParseException</code> with the specified detail message.
+     * @param msg the detail message.
+     */
+    public XmlParseException(String msg) {
+        super(msg);
+    }
+
+    /**
+     * Creates a new instance of <code>XmlParseException</code> without detail message.
+     * @param message as of exception specific message
+     * @param cause parent throwable with cause
+     */
+    public XmlParseException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    /**
+     * Creates a new instance of <code>XmlParseException</code> without detail message.
+     * @param parent throwable with cause
+     */
+    public XmlParseException(Throwable cause) {
+        super(cause);
+    }
+}

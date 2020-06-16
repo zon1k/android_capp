@@ -1,0 +1,20 @@
+public class ServerResponse {
+
+    private HashMap<String, String> returnedHeader;
+    private String postString;
+
+
+    public ServerResponse(String postString, HashMap<String, String> returnedHeader) {
+        this.returnedHeader =  returnedHeader;
+        this.postString = postString;
+    }
+
+    public HashMap<String, String> getReturnedHeader() {
+        return returnedHeader;
+    }
+
+    public String getPostString() {
+        return postString;
+    }
+
+}

@@ -1,0 +1,5 @@
+public interface IParser {
+
+    public void initParser(String xmlString) throws XmlParseException;
+    public NodeList parse(String element);
+}

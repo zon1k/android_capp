@@ -1,0 +1,7 @@
+public class AppConstants { 
+ 
+	public static List<Modules> loadedModules = new ArrayList<>();
+	
+	public AppConstants(){
+	}
+ }

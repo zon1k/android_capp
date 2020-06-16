@@ -1,0 +1,45 @@
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.NodeList;
+import java.io.ByteArrayInputStream;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import XmlParseException;
+
+public class CappParser implements IParser {
+
+    private Document document;
+    private Logger log = LoggerFactory.getLogger(CappParser.class);
+
+
+    @Override
+    public void initParser(String xmlString) throws XmlParseException {
+        if(xmlString == null)
+            return;
+        DocumentBuilderFactory fact = null;
+        DocumentBuilder builder = null;
+        try {
+            fact = DocumentBuilderFactory.newInstance();
+            builder = fact.newDocumentBuilder();
+            this.document = builder.parse(new ByteArrayInputStream(xmlString.getBytes()));
+        } catch(javax.xml.parsers.ParserConfigurationException ex) {
+            throw new XmlParseException(ex);
+        } catch (org.xml.sax.SAXException ex) {
+            throw new XmlParseException(ex);
+        } catch (java.io.IOException ex) {
+            throw new XmlParseException(ex);
+        }
+    }
+
+    @Override
+    public NodeList parse(String element) {
+        NodeList result = null;
+        if(this.document != null) {
+            result = this.document.getElementsByTagName(element);
+        }
+        return result;
+    }
+
+}

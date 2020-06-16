@@ -1,0 +1,128 @@
+public class SyncDaemon extends Thread {
+
+    private List<UpdateRequestEventListener> listenerList;
+    private static int CONNECTION_ATTEMPTS = 3;
+    private String url;
+    private DateFormat format;
+    private int called = 0;
+    private AtomicBoolean requestInProgress = new AtomicBoolean(false);
+    private Runnable nextAction;
+    private TextView lastCommunication;
+    private LoginActivity app;
+  
+	public SyncDaemon(String url, LoginActivity app) {
+        this.format =  new SimpleDateFormat("HH:mm:ss (dd/MM/yy)");
+        listenerList = new ArrayList<>();
+        this.url = url;
+        this.app = app;
+    }
+    public static java.util.concurrent.ExecutorService threadPool = java.util.concurrent.Executors.newCachedThreadPool();
+   
+   @Override
+    public void run() { //TODO: kod treba prepisat aby bol krajsi a prehladnejsi. pisany narychlo
+
+                Thread.currentThread().setName("SyncDaemon-Thread");
+                Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
+                ConnectionManager connection = new ConnectionManager(LoginActivity.app);
+                ServerResponse response;
+                int errorCounter = 0;
+                while(true) {
+                    try {
+                        response = connection.requestData(String.format(this.url, this.app.getConnection().getUid(), this.app.getConnection().getBranch()));
+                        if (response.getPostString().trim().equalsIgnoreCase("OKdata")) { // ak bol request preruseny z dovodu novych dat.
+                            Log.d("DNU V OK DATA","DNU V OK DATA");
+                            Runnable dataThread = new Runnable(){
+
+                                public void run() {
+                                    try {
+                                        //vytvorenie novej udalosti
+                                        UpdateRequestEvent event = new UpdateRequestEvent(this);
+                                        for(UpdateRequestEventListener listener : listenerList){
+                                            listener.handleUpdateRequestListener(event);
+                                        }
+                                        if (called == 0) {
+                                            called++;
+//											lastCommunication.setText(format.format(new Date() + "Prijal som prve nastavenia"));
+                                            Log.d("Prve nastavenia", "Prijal som prve nastavenia");
+                                        }
+                                    } catch (Throwable t) {
+                                        Log.d("Unable to process request OKData", "Unable to process request OKData");
+                                    }
+                                }
+                            };
+                            if (requestInProgress.compareA&ndSet(false, true)) {
+                                threadPool.execute(dataThread);
+                                Log.d("Dnu","V requestInProgress");
+                            } else {
+                                nextAction = dataThread;
+                                Log.d("Mimo","requestInProgress podmienky");
+                            }
+                        } else if (response.getPostString().trim().equalsIgnoreCase("stop")) {
+                            Log.d("Synchronizacne vlakno prijalo spravu","zla poziadavka streamu");
+                            return;
+                        } if(response.getPostString().trim().equalsIgnoreCase("OKEmpty")){ // ak bol stream preruseny z dovodu timeoutu
+                            Log.d("DNU", "DNU V OKEMPTY");
+                            Runnable dataThread = new Runnable(){
+                                @Override
+                                public void run() {
+                                    try {
+                                        UpdateRequestEvent event = new UpdateRequestEvent(this);
+                                        //odoslanie udalosti vsetkych listenerom
+                                        for(UpdateRequestEventListener listener : listenerList){
+                                            listener.handleUpdateRequestListener(event);
+                                        }
+//                                      lastCommunication.setText(format.format(new Date() + "Žiadne nové nastavenia"));
+                                        Log.d("Ziadne nove nastavenia","Ziadne nove nastavenia");
+                                    } catch( Throwable t ){
+                                        Log.d("Unable to process OKEmpty","Unable to process OKEmpty");
+                                    }
+                                }
+                            };
+                            if( requestInProgress.compareAndSet(false, true)){
+                                threadPool.execute(dataThread);
+                                Log.d("Dnu","V requestInProgress");
+                            } else {
+                                nextAction = dataThread;
+                                Log.d("Mimo","requestInProgress podmienky");
+                            }
+                        }
+                        errorCounter = 0; //ak to presne zrejestujeme ho
+                        AppSettings.connected = true;
+                    }
+                    catch(RequestException ex) {
+                        try {
+                            //TODO: hodit do logov + ten chybovy vystup
+                            Log.d(ex.getMessage(),"Synchronizacne vlakno stratilo spojenie");
+                            errorCounter++;
+                            AppSettings.connected = false;
+                            if(errorCounter > SyncDaemon.CONNECTION_ATTEMPTS){
+                                Log.d("Vypadok Sppojenia", "Systemu sa opakovane nepodarilo nadviazat spojenie so serverom");
+                                this.sleep(30000);
+                            }
+                        } catch (InterruptedException ex1) {
+                            //nerob nic toto nie je chyba
+                            ex1.printStackTrace();
+                        }
+                    }
+                }
+            }
+    public void finishRequest() {
+        if( nextAction != null ){
+            threadPool.execute(nextAction);
+            nextAction = null;
+            Log.d("finish request","if");
+        } else {
+            requestInProgress.set(false);
+            Log.d("finish request","else");
+        }
+    }
+
+    public synchronized void addEventListener(UpdateRequestEventListener eventListener) {
+        this.listenerList.add(eventListener);
+    }
+
+    public synchronized void removeEventListener(UpdateRequestEventListener eventListener) {
+        this.listenerList.remove(eventListener);
+    }
+
+}

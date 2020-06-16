@@ -1,0 +1,73 @@
+
+	private SyncDaemon synDam;
+    private UpdateManager updater;
+	private ConnectionManager connection;
+	private LoginActivity app;
+	private String syncStreamConn = "";
+	private Button btnLogin;
+	
+	public class LoginActivity(){
+	
+		public LoginActivity(){
+			app = this;
+			
+		}
+		@Override
+		protected void onCreate(Bundle savedInstanceState) {
+
+			super.onCreate(savedInstanceState);
+			setContentView(R.layout.loginLayout);
+			
+			connection = new ConnectionManager(app);
+			btnLoginListener();
+		}
+		private void btnLoginListener(){
+			btnLogin.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					logginProcess();
+				}
+			});
+		}
+		private void logginProcess() {
+
+			Credentials credentials = getCredentials();
+			LoginState logSt = getConnection().logIn(credentials);
+			if (logSt == LoginState.SUCCESS) {
+			
+				AppSettings.logRegime = Regime.ONLINE;
+			
+			//otvori dalsiu activity
+				openStatusActivity();
+//          logged = true;
+				Log.d("Uspesne prihlaseny", "Uspesne prihlaseny");
+				Toast.makeText(context,"Úspešne prihlasený",Toast.LENGTH_LONG).show();
+				
+				synDam = new SyncDaemon(syncStreamConn, this,lastCommunication);
+				getSynDam().setDaemon(true);
+				getSynDam().start();
+				updater = new UpdateManager(this);
+				getUpdater().initManager();
+				getUpdater().downloadSettings();
+			
+			} else{
+			
+				Log.d("Nespravne udaje", "Nespravne udaje");
+				Toast.makeText(context, "Nesprávne prihlasovacie údaje", Toast.LENGTH_LONG).show();
+			}
+			
+		}
+		
+		public UpdateManager getUpdater () {
+			return updater;
+		}
+
+		public SyncDaemon getSynDam () {
+			return synDam;
+		}
+		
+		public ConnectionManager getConnection () {
+			return connection;
+		}
+	
+	

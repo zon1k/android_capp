@@ -1,0 +1,139 @@
+public class UpdateManager {
+
+    private SyncDaemon synDam;
+    private ConnectionManager connection;
+    private List<ModuleContainer> moduleContainers;
+    private DateFormat format;
+    private LoginActivity app;
+
+    public UpdateManager(LoginActivity app) {
+
+        this.app = app;
+        this.format =  new SimpleDateFormat("HH:mm:ss dd/MM/yy");
+        this.synDam = app.getSynDam();
+        this.connection = app.getConnection();
+        this.moduleContainers = new ArrayList<>();
+        BusinessContainer bc = null;
+      
+	  for(Modules mod: AppConstants.loadedModules) {
+            if(mod == Modules.BASIC)
+                this.moduleContainers.add(new BasicContainer(app));
+            else if(mod == Modules.BUSINESS){
+                bc = new BusinessContainer(app);
+                this.moduleContainers.add(bc);
+            }else if(mod == Modules.TRANSFER)
+                this.moduleContainers.add(new TransferContainer(app));
+//            else if(mod == Modules.UPLOAD)
+//                this.moduleContainers.add(new UploadContainer(app));
+        }
+
+    }
+    public void initManager() {
+        //listener pre poziadavku zo strany servera
+        this.synDam.addEventListener( new UpdateRequestEventListener() {
+            @Override
+            public void handleUpdateRequestListener(EventObject event) {
+                downloadSettings();
+            }
+        });
+    }
+ 
+    private void setSettings(String xmlString) throws UnknownSettingsException {
+        try {
+            CappParser parser = new CappParser();
+            parser.initParser(xmlString);
+            String value = parser.parse("result").item(0).getTextContent();
+            switch( value ){
+                case "70":
+                    System.exit(0);
+                    break;
+                case "4":
+                    // noop continue there is issue with data so we wait for SyncDeamon to pool for new data.
+                default:
+                    this.updateModules(parser);
+            }
+        } catch (XmlParseException ex) {
+            Log.d("Chyba xml","Xml parser nespracoval prijaty text");
+            throw new UnknownSettingsException();
+        }
+    }
+
+    public void downloadSettings() {
+        try {
+            String resp = connection.downloadData();
+            synDam.finishRequest();
+            if(resp == null){
+                Log.d("Prazdne", "Prazdny response v downloadSettings metode");
+                return;
+            }
+            Log.d("Robim","Download settings");
+            //System.out.println("SETT: " + resp);
+            setSettings(resp);
+        } catch (CRCException ex) {
+            Log.d("Spojenie prerusene", "z bezpecnostnych dvovodov");
+            connection.logOff();
+            AppSettings.connected = false;
+            this.app.logginProcess();
+        } catch (UnknownSettingsException ex) {
+            try {
+                try {
+                    setSettings(connection.downloadData());
+                    Log.d("Robim","Download data - 140");
+                } catch (UnknownSettingsException ex1) {
+                    Log.d("Chyba", "pri nacitani nastaveni zo servera");
+                }
+            } catch (CRCException ex1) {
+                this.connection.logOff();
+                Log.d("Spojenie prerusene", "z bezpecnostnych dvovodov2");
+                AppSettings.connected = false;
+                this.app.logginProcess();
+            }
+        }
+    }
+
+    public void updateModules(IParser parser){
+        for(ModuleContainer container: this.moduleContainers)
+            container.setValues(parser);
+    }
+
+    public boolean update(String request) {
+        boolean res = false;
+        try {
+            CappParser parser = new CappParser();
+            String servResponse = this.connection.update(request);
+
+            parser.initParser(servResponse);
+            NodeList nodes = parser.parse("result");
+            String result = nodes.item(0).getTextContent();
+            if("1".equals(result)){
+				Log.d("","Zmena nastaveni uspesne vykonana");
+                res = true;
+            } else if ("3".equals(result)) {
+                Log.d("CHYBA","Server vratil" + servResponse);
+            } else if("7".equals(result)){
+                Log.d("CHYBA","Server vratil" + servResponse);
+            }else if("0".equals(result)){
+                Log.d("CHYBA","Pripojenie k internetu je nedostupne");
+            }else if("100".equals(result)){
+                Log.d("CHYBA","Pripojenie k internetu je nedostupne");
+                System.exit(0); //toto tu je docasne kym nebude onlinerezim
+            }else {
+                Log.d("CHYBA","Pri zmene nastaveni sa vyskytla chyba");
+            }
+        } catch (XmlParseException ex) {
+            Log.d("CHYBA","Aplikacia nespracovala potvrdenie o zmene nastaveni");
+        } catch(CRCException ex) {
+            AppSettings.connected = false;
+            Log.d("CHYBA","Spojenie prerusene z bezpecnostnych dvovodv3");
+            connection.logOff();
+            this.app.logginProcess();
+        }
+        return res;
+    }
+
+//    @Override
+    public List<ModuleContainer> getModuleContainers() {
+        return this.moduleContainers;
+    }
+
+}

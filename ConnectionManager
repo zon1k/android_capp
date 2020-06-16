@@ -1,0 +1,257 @@
+   public class ConnectionManager(){ 
+   
+		private String branch = "0";
+		private String uid = "000";
+	
+		public ConnectionManager(LoginActivity app){
+			this.format = new SimpleDateFormat("HH:mm:ss (dd/MM/yy)");
+			this.app = app;
+		}
+		
+		public LoginState logIn(Credentials credentials, String log, String pass) {
+			
+			String login = credentials.getUserName();
+			String password = credentials.getPassword();
+			
+			//poziadavka na prihlasenie sa do systemu.
+			String connectionString;
+			
+			//vyziadaj kluc. odoslanie poziadavky na kluc
+			ServerResponse response;
+			try {
+				//vyziadanie verejneho kluca
+				if (serverPublicKey == null) {
+					// string posielany pri vyzadovani verejneho kluca
+					serverPublicKey = this.requestPublicKey();
+				}
+				//zostavenie prihlasovacieho stringu
+				String myKey = this.createKey();
+				connectionString = "login="+ Utils.Base64Encode(this.Encrypt(myKey.getBytes(), login.getBytes())) +
+						"&passw="+ Utils.Base64Encode(this.Encrypt(myKey.getBytes(),password.getBytes())) +
+						"&keydata="+Utils.Base64Encode(this.RSAEncrypt(serverPublicKey, myKey))+
+						"&keyactn=auth";
+
+				//odoslanie poziadavky na login
+				response = this.requestData(AppConstants.authStreamConn, connectionString);
+				String[] responseVals = this.parseString(response.getPostString(), "#", true, myKey);
+
+				if (responseVals.length < 3) {
+					Log.d("Vrateny retazec autentifikacie je nekorektny","Chyba pri komunikacii so serverom");
+					return LoginState.INVALID_STRING;
+				}
+
+				switch (responseVals[1].toLowerCase()) {
+					case "authsuccess":
+						String cookieHeader = null;
+						this.sessionNumber = responseVals[0];
+						this.uid = responseVals[2];
+						cookieHeader = response.getReturnedHeader().get("Set-Cookie");
+						String[] cookieStrings = this.parseString(cookieHeader, ";", false, null);
+						for (String s : cookieStrings) {
+							if (s.contains("Ccontroll="))
+								this.sessionID = s;
+						}
+						try{
+							String[] modules = responseVals[3].split(":");
+							for(String s: modules){
+								switch(s){
+									case "main": AppConstants.loadedModules.add(Modules.BASIC);  Log.d("Nacitany modul","main"); break;
+									case "business": AppConstants.loadedModules.add(Modules.BUSINESS); AppConstants.loadedModules.add(Modules.PRINT); AppConstants.loadedModules.add(Modules.CASH);AppConstants.loadedModules.add(Modules.WEIGHT);AppConstants.loadedModules.add(Modules.CARD_TERMINAL);AppConstants.loadedModules.add(Modules.UPDATE);Log.d("nacitany modul","buisness"); break;
+									case "transfer": AppConstants.loadedModules.add(Modules.TRANSFER);   Log.d("Nacitany modul","transfer"); break;
+									case "gallery": AppConstants.loadedModules.add(Modules.UPLOAD);  Log.d("Nacitany modul","gallery"); break;
+									default: break;
+								}
+							}
+							AppConstants.sortList();
+						}catch(Exception ex){
+							Log.d("Chyba incializacie","Neboli prijate konkretne nastavenia modulov");
+							AppConstants.loadedModules = Arrays.asList(new Modules[]{Modules.BASIC});
+						}
+						return LoginState.SUCCESS;
+					case "authfailure":
+						Log.d("fail","Prihlasovacie meno alebo heslo je nespravne");
+						return LoginState.FAILURE;
+					case "authlocked":
+						Log.d("fail","Pristup bol pre dany ucet odmietnuty serverom");
+						return LoginState.LOCKED;
+					case "authsysacc":
+						return LoginState.SYSACCOUNT;
+					case "authbanned":
+						Log.d("fail","Pristup je docasne zablokovany. Pre vysoky pocet neplatnych pokusov");
+						return LoginState.BANNED;
+					case "authending":
+						Log.d("fail","Prevadzka systemu ku ktoremu sa snazite pripojit bola ukoncena");
+						return LoginState.ENDING;
+					default:
+						Log.d("fail","Nepodarilo sa prihlasit. Server vratil neznamy stav");
+						return LoginState.NA;
+				}
+			} catch (RequestException ex) {
+				Log.d("Fail","Nepodarene pripojenie");
+				return LoginState.FAILURE;
+			}
+		}
+	
+		public ServerResponse requestData(String url, String postString) throws RequestException {
+			try {
+				URL serverURL = new URL(url);
+				HttpURLConnection connection = (HttpURLConnection) serverURL.openConnection();
+				StringBuilder message = null;
+				HashMap<String, String> map = new HashMap<>();
+				if (this.getSessionID() != null) {
+					connection.setRequestProperty("Cookie", this.getSessionID());
+				}
+
+				connection.setRequestProperty("User-Agent", ConnectionManager.USER_AGENT);
+				connection.setConnectTimeout(60000);
+				connection.setReadTimeout(120000);
+				connection.setRequestMethod("POST");
+				connection.setDoOutput(true);
+				connection.connect();
+
+				connection.getOutputStream().write(postString.getBytes());
+				connection.getOutputStream().flush();
+				//nacitanie odpovede
+				message = new StringBuilder();
+				int i;
+				int j = 0;
+				byte[] bytes = new byte[512];
+				while ((i = connection.getInputStream().read()) != -1) {
+					bytes[j++] = (byte) i;
+					if (j == bytes.length) {
+						byte[] newBytes = Arrays.copyOf(bytes, bytes.length * 2);
+						bytes = newBytes;
+					}
+					//message.append((char)i);
+				}
+				bytes = Arrays.copyOf(bytes, j);
+				//nacitaj obsah hlavicky
+				for (i = 0; ; i++) {
+					if (connection.getHeaderField(i) == null)
+						break;
+					map.put(connection.getHeaderFieldKey(i),
+							connection.getHeaderField(i));
+				}
+				ServerResponse response = new ServerResponse(new String(bytes, "UTF8"), map);
+				connection.disconnect(); //ukonci toto spojenie
+				return response;
+			} catch (java.net.SocketException ex) {
+				AppSettings.connected = false;
+				throw new RequestException(ex);
+			} catch (java.io.IOException ex) {
+				if (ex.getMessage().contains("401")) {
+                Log.d("Odhlasenie serverom", format.format(new Date()));
+				this.logOff();
+                app.logginProcess();
+				}
+				ex.printStackTrace();
+				throw new RequestException("IOExcp", ex);
+			}
+		}
+		public String requestPublicKey() throws RequestException {
+			String result = null;
+			try {
+				String requestString = "keyactn=pubkey";
+				//poziadavka na prihlasenie sa do systemu.
+				String connectionString;
+				//vyziadaj kluc. odoslanie poziadavky na kluc
+
+				//vyziadanie verejneho kluca
+				ServerResponse response = this.requestData(AppConstants.authStreamConn, requestString);
+				return result = response.getPostString();
+			} catch (RequestException ex) {
+				throw ex;
+			}
+		}
+		public void logOff() {
+			try {
+				if(!AppSettings.connected)
+					return;
+				String myKey = this.createKey();
+				ServerResponse response = this.requestData(AppConstants.authStreamConn,"keyactn=logout&keyses=" + Utils.Base64Encode(this.Encrypt(myKey, this.getSessionID()))+"&keydata="+Utils.Base64Encode(this.RSAEncrypt(serverPublicKey, myKey)));
+				String responseStatus = this.parseString(response.getPostString(), null, true, myKey)[0];
+				switch(responseStatus){
+					case "logoutsuccess":
+						Log.d("Uzivatel sa uspesne odhlasil","Uzivatel sa uspesne odhlasil");
+                    break;
+					case "logoutfailure":
+						Log.d("Server vratil stav LOGOUTFAILURE","Odhlasenie zo servera neprebehlo korektne");
+                    break;
+					default:
+						Log.d("Server vratil neznamy stav N/A","Odhlasenie zo servera neprebehlo korektne");
+            }
+        } catch (RequestException ex) {
+              Log.d("Chyba","Chyba pri komunikacii so serverom");
+               return;
+        }
+		}
+		public String[] parseString(String string, String deliminer, boolean base64Coded, String myKey)  {
+			byte[] bytes = null;
+				if(base64Coded == true) {
+					bytes = Utils.Base64Decode(string);
+				} else {
+					try {
+						bytes = string.getBytes("UTF8");
+					} catch (UnsupportedEncodingException ex) {
+						ex.printStackTrace();
+					}
+				}	 
+			if(myKey != null) {
+				try {
+					string = this.Decrypt(myKey.getBytes("UTF8"), bytes);
+				} catch (UnsupportedEncodingException ex) {
+					ex.printStackTrace();
+				} 
+			}
+			if(deliminer != null){
+				return  string.split(deliminer);  
+			}
+			else{ 
+             return new String[] {string};
+			}
+		}   
+		public String downloadData() throws CRCException{
+			try{
+				String myKey = this.createKey();
+				ServerResponse response = this.requestData(AppConstants.authStreamConn, encryptConnectionData("","", myKey));
+				String[] strings = response.getPostString().split("\n");			
+
+				if(strings.length != 2){
+					Log.d("Retazec ma viac ako dva riadky","Chyba pri komunikacii so serverom");
+                }        
+				//Kontrolny sucet (string)
+				String decrypted = this.parseString(strings[1].trim(), null , true, myKey)[0];
+            
+				// ak najdeme base64 enkodovany string predpokladame ze je to zipovane
+				if( Utils.isBase64Encoded( decrypted ) ){
+					try {
+						decrypted = decomposeZipData(decrypted);
+					} catch( Exception e ){
+						throw new CRCException("Nebolo mozme decryptovat",e);
+					}
+				}
+  
+				String md5string = Utils.MD5(decrypted);
+
+				if(!md5string.equals(strings[0])){
+					throw new CRCException("My MD5: " + md5string + " rec md5: " + strings[0]+ " string: " + decrypted );
+				}
+
+				return decrypted;
+			} catch (RequestException ex) {
+				//nemozno vykonat poziadavok
+				ex.printStackTrace();
+				capp.logging.Logger.getLogger().logError(ex.getMessage(), "Chyba pri nacitavani nastaveni zo servera",
+                                    1604, false);
+				return null;
+			} 
+		} 
+     	
+		public String getBranch() {
+			return this.branch;
+		}
+		public String getUid() {
+			return this.uid;
+		}
+	
+	}	
